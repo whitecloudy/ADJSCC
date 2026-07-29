@@ -1,0 +1,6 @@
+data/
+model/
+loss/
+eval/
+
+*.pyc

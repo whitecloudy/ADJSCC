@@ -1,16 +1,41 @@
+import argparse
+import json
+import os
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+
+from dataset import dataset_cifar10
 from util_channel import Channel
 from util_module import Basic_Encoder, Basic_Decoder
-from tensorflow.keras.layers import Input, Lambda
-from tensorflow.keras import Model
-from tensorflow.keras.optimizers import Adam
-import tensorflow as tf
-import numpy as np
-import argparse
-from dataset import dataset_cifar10
-import os
-import json
 
-AUTOTUNE = tf.data.experimental.AUTOTUNE
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+class BDJSCC_Model(nn.Module):
+    def __init__(self, channel_type, tcn):
+        super(BDJSCC_Model, self).__init__()
+        self.channel_type = channel_type
+        self.encoder = Basic_Encoder(tcn)
+        self.decoder = Basic_Decoder(tcn)
+        self.channel = Channel(channel_type)
+
+    def forward(self, inputs):
+        imgs = inputs[0]
+        snrdb = inputs[1]
+        if self.channel_type in ['slow_fading', 'slow_fading_eq']:
+            h_real = inputs[2]
+            h_imag = inputs[3]
+            enc = self.encoder(imgs)
+            rv = self.channel(enc, snr_db=snrdb, h_real=h_real, h_imag=h_imag)
+            dec = self.decoder(rv)
+        else:
+            enc = self.encoder(imgs)
+            rv = self.channel(enc, snr_db=snrdb)
+            dec = self.decoder(rv)
+        return dec * 255.0
 
 
 def train(args, model):
@@ -18,36 +43,68 @@ def train(args, model):
     loss_list = []
     val_loss_list = []
     min_loss = 10 ** 8
-    if args.load_model_path is not None:
-        model.load_weights(args.load_model_path)
+
+    os.makedirs(args.model_dir, exist_ok=True)
+    os.makedirs(args.loss_dir, exist_ok=True)
+
     filename = os.path.basename(__file__).split('.')[0] + '_' + str(args.channel_type) + '_tcn' + str(
-        args.transmit_channel_num) + '_snrdb' + str(args.snr_train) + '_bs' + str(args.batch_size)+'_lr'+str(args.learning_rate)
-    model_path = args.model_dir + filename + '.h5'
+        args.transmit_channel_num) + '_snrdb' + str(args.snr_train) + '_bs' + str(args.batch_size) + '_lr' + str(args.learning_rate)
+    model_path = os.path.join(args.model_dir, filename + '.pt')
+
+    if args.load_model_path is not None and os.path.exists(args.load_model_path):
+        model.load_state_dict(torch.load(args.load_model_path, map_location=device))
+
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    criterion = nn.MSELoss()
+
     for epoch in range(0, args.epochs):
         if args.channel_type == 'awgn':
             (train_ds, train_nums), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr(args.snr_train)
-        elif args.channel_type == 'slow_fading' or args.channel_type == 'slow_fading_eq':
+        elif args.channel_type in ['slow_fading', 'slow_fading_eq']:
             (train_ds, train_nums), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr_and_h(args.snr_train)
-        train_ds = train_ds.shuffle(buffer_size=train_nums)
-        train_ds = train_ds.batch(args.batch_size)
-        test_ds = test_ds.batch(args.batch_size)
-        train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
-        train_step = (train_nums//args.batch_size if train_nums%args.batch_size==0 else train_nums//args.batch_size+1)
-        valid_step = (test_nums//args.batch_size if test_nums%args.batch_size==0 else test_nums//args.batch_size+1)
-        h = model.fit(train_ds, epochs=1, steps_per_epoch=train_step, validation_data=test_ds, validation_steps=valid_step)
-        his = h.history
-        loss = his.get('loss')[0]
-        val_loss = his.get('val_loss')[0]
+
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+        test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
+
+        model.train()
+        running_loss = 0.0
+        for inputs, targets in train_loader:
+            inputs = [inp.to(device) for inp in inputs]
+            targets = targets.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item() * len(targets)
+
+        epoch_loss = running_loss / train_nums
+
+        model.eval()
+        running_val_loss = 0.0
+        with torch.no_grad():
+            for inputs, targets in test_loader:
+                inputs = [inp.to(device) for inp in inputs]
+                targets = targets.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                running_val_loss += loss.item() * len(targets)
+
+        val_loss = running_val_loss / test_nums
+
         if val_loss < min_loss:
             min_loss = val_loss
-            model.save_weights(model_path)
-            print('Epoch:', epoch + 1, ',loss=', loss, 'val_loss:', val_loss, 'save')
+            torch.save(model.state_dict(), model_path)
+            print('Epoch:', epoch + 1, ',loss=', epoch_loss, 'val_loss:', val_loss, 'save')
         else:
-            print('Epoch:', epoch + 1, ',loss=', loss, 'val_loss:', val_loss)
+            print('Epoch:', epoch + 1, ',loss=', epoch_loss, 'val_loss:', val_loss)
+
         epoch_list.append(epoch)
-        loss_list.append(loss)
+        loss_list.append(epoch_loss)
         val_loss_list.append(val_loss)
-        with open(args.loss_dir + filename + '.json', mode='w') as f:
+        with open(os.path.join(args.loss_dir, filename + '.json'), mode='w') as f:
             json.dump({'epoch': epoch_list, 'loss': loss_list, 'val_loss': val_loss_list}, f)
 
 
@@ -56,34 +113,65 @@ def train_mix(args, model):
     loss_list = []
     val_loss_list = []
     min_loss = 10 ** 8
+
+    os.makedirs(args.model_dir, exist_ok=True)
+    os.makedirs(args.loss_dir, exist_ok=True)
+
     filename = os.path.basename(__file__).split('.')[0] + '_' + str(args.channel_type) + '_tcn' + str(
-        args.transmit_channel_num) + '_snrdbmix_bs' + str(args.batch_size)+'_lr'+str(args.learning_rate)
-    model_path = args.model_dir + filename + '.h5'
+        args.transmit_channel_num) + '_snrdbmix_bs' + str(args.batch_size) + '_lr' + str(args.learning_rate)
+    model_path = os.path.join(args.model_dir, filename + '.pt')
+
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    criterion = nn.MSELoss()
+
     for epoch in range(0, args.epochs):
         if args.channel_type == 'awgn':
             (train_ds, train_nums), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr_range(0, 20)
-        elif args.channel_type == 'slow_fading' or args.channel_type == 'slow_fading_eq':
+        elif args.channel_type in ['slow_fading', 'slow_fading_eq']:
             (train_ds, train_nums), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr_and_h(args.snr_train)
-        train_ds = train_ds.shuffle(buffer_size=train_nums)
-        train_ds = train_ds.batch(args.batch_size)
-        test_ds = test_ds.batch(args.batch_size)
-        train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
-        train_step = (train_nums//args.batch_size if train_nums%args.batch_size==0 else train_nums//args.batch_size+1)
-        valid_step = (test_nums//args.batch_size if test_nums%args.batch_size==0 else test_nums//args.batch_size+1)
-        h = model.fit(train_ds, epochs=1, steps_per_epoch=train_step, validation_data=test_ds, validation_steps=valid_step)
-        his = h.history
-        loss = his.get('loss')[0]
-        val_loss = his.get('val_loss')[0]
+
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+        test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
+
+        model.train()
+        running_loss = 0.0
+        for inputs, targets in train_loader:
+            inputs = [inp.to(device) for inp in inputs]
+            targets = targets.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item() * len(targets)
+
+        epoch_loss = running_loss / train_nums
+
+        model.eval()
+        running_val_loss = 0.0
+        with torch.no_grad():
+            for inputs, targets in test_loader:
+                inputs = [inp.to(device) for inp in inputs]
+                targets = targets.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                running_val_loss += loss.item() * len(targets)
+
+        val_loss = running_val_loss / test_nums
+
         if val_loss < min_loss:
             min_loss = val_loss
-            model.save_weights(model_path)
-            print('Epoch:', epoch + 1, ',loss=', loss, 'val_loss:', val_loss, 'save')
+            torch.save(model.state_dict(), model_path)
+            print('Epoch:', epoch + 1, ',loss=', epoch_loss, 'val_loss:', val_loss, 'save')
         else:
-            print('Epoch:', epoch + 1, ',loss=', loss, 'val_loss:', val_loss)
+            print('Epoch:', epoch + 1, ',loss=', epoch_loss, 'val_loss:', val_loss)
+
         epoch_list.append(epoch)
-        loss_list.append(loss)
+        loss_list.append(epoch_loss)
         val_loss_list.append(val_loss)
-        with open(args.loss_dir + filename + '.json', mode='w') as f:
+        with open(os.path.join(args.loss_dir, filename + '.json'), mode='w') as f:
             json.dump({'epoch': epoch_list, 'loss': loss_list, 'val_loss': val_loss_list}, f)
 
 
@@ -91,60 +179,61 @@ def eval_mismatch(args, model):
     filename = os.path.basename(__file__).split('.')[0] + '_' + str(args.channel_type) + '_tcn' + str(
         args.transmit_channel_num) + '_snrdb' + str(args.snr_eval) + '_bs' + str(args.batch_size) + '_lr' + str(
         args.learning_rate)
-    model_path = args.model_dir + filename + '.h5'
-    model.load_weights(model_path)
+    model_path = os.path.join(args.model_dir, filename + '.pt')
+    if not os.path.exists(model_path):
+        model_path = os.path.join(args.model_dir, filename + '.h5')
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location=device))
+
+    os.makedirs(args.eval_dir, exist_ok=True)
+    criterion = nn.MSELoss()
+    model.eval()
+
     snr_list = []
     mse_list = []
     psnr_list = []
+
     for snrdb in range(0, 21):
         imse = []
-        # test 10 times each snr
         for i in range(0, 10):
             if args.channel_type == 'awgn':
                 (_, _), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr(snrdb)
-            elif args.channel_type == 'slow_fading' or args.channel_type == 'slow_fading_eq':
+            elif args.channel_type in ['slow_fading', 'slow_fading_eq']:
                 (_, _), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr_and_h(snrdb)
-            test_ds = test_ds.shuffle(buffer_size=test_nums)
-            test_ds = test_ds.batch(args.batch_size)
-            mse = model.evaluate(test_ds)
+
+            test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=True)
+            running_mse = 0.0
+            with torch.no_grad():
+                for inputs, targets in test_loader:
+                    inputs = [inp.to(device) for inp in inputs]
+                    targets = targets.to(device)
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    running_mse += loss.item() * len(targets)
+
+            mse = running_mse / test_nums
             imse.append(mse)
-        mse = np.mean(imse)
+
+        mse = float(np.mean(imse))
         psnr = 10 * np.log10(255 ** 2 / mse)
         snr_list.append(snrdb)
         mse_list.append(mse)
         psnr_list.append(psnr)
-        with open(args.eval_dir + filename + '.json', mode='w') as f:
+        with open(os.path.join(args.eval_dir, filename + '.json'), mode='w') as f:
             json.dump({'snr': snr_list, 'mse': mse_list, 'psnr': psnr_list}, f)
 
 
 def main(args):
-    # construct encoder-decoder model
-    input_imgs = Input(shape=(32, 32, 3))
-    input_snrdb = Input(shape=(1,))
-    input_h_real = Input(shape=(1,))
-    input_h_imag = Input(shape=(1,))
-    normal_imgs = Lambda(lambda x: x / 255, name='normal')(input_imgs)
-    encoder = Basic_Encoder(normal_imgs, args.transmit_channel_num)
-    if args.channel_type == 'awgn':
-        rv = Channel(channel_type='awgn')(encoder, input_snrdb)
-    elif args.channel_type == 'slow_fading':
-        rv = Channel(channel_type='slow_fading')(encoder, input_snrdb, input_h_real, input_h_imag)
-    elif args.channel_type == 'slow_fading_eq':
-        rv = Channel(channel_type='slow_fading_eq')(encoder, input_snrdb, input_h_real, input_h_imag)
-    decoder = Basic_Decoder(rv)
-    rv_imgs = Lambda(lambda x: x * 255, name='denormal')(decoder)
-    if args.channel_type == 'awgn':
-        model = Model(inputs=[input_imgs, input_snrdb], outputs=rv_imgs)
-    elif args.channel_type == 'slow_fading' or args.channel_type == 'slow_fading_eq':
-        model = Model(inputs=[input_imgs, input_snrdb, input_h_real, input_h_imag], outputs=rv_imgs)
-    model.compile(Adam(args.learning_rate), 'mse')
-    model.summary()
+    model = BDJSCC_Model(args.channel_type, args.transmit_channel_num).to(device)
+    print(model)
+
     if args.command == 'train':
         train(args, model)
     elif args.command == 'eval_mismatch':
         eval_mismatch(args, model)
     elif args.command == 'train_mix':
         train_mix(args, model)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
