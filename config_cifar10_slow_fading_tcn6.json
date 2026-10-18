@@ -1,0 +1,19 @@
+{
+  "command": "train",
+  "channel_type": "slow_fading",
+  "transmit_channel_num": 6,
+  "in_channels": 3,
+  "image_size": [32, 32],
+  "batch_size": 128,
+  "epochs": 1280,
+  "learning_rate": 0.0001,
+  "snr_low_train": 0,
+  "snr_up_train": 20,
+  "snr_low_eval": 0,
+  "snr_up_eval": 20,
+  "model_dir": "misc/ADJSCC/model/",
+  "loss_dir": "misc/ADJSCC/loss/",
+  "eval_dir": "misc/ADJSCC/eval/",
+  "load_model_path": null,
+  "device": "cuda"
+}

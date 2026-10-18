@@ -228,8 +228,10 @@ def main(args):
 
 
 if __name__ == "__main__":
+    import sys
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", help='train/eval/eval_burst')
+    parser.add_argument("command", nargs='?', default=None, help='train/eval/eval_burst')
+    parser.add_argument("-c", "--config", help="config file path (yaml or json)", default=None)
     parser.add_argument("-ct", '--channel_type', help="awgn/slow_fading/slow_fading_eq/burst")
     parser.add_argument("-md", '--model_dir', help="dir for model", default='model/')
     parser.add_argument("-lmp", '--load_model_path', help="model path for loading")
@@ -249,6 +251,53 @@ if __name__ == "__main__":
                         default=0., type=float)
     global args
     args = parser.parse_args()
+
+    if args.config is not None and os.path.exists(args.config):
+        ext = os.path.splitext(args.config)[1].lower()
+        if ext in ['.yaml', '.yml']:
+            try:
+                import yaml
+                with open(args.config, 'r', encoding='utf-8') as f:
+                    cfg = yaml.safe_load(f) or {}
+            except ImportError:
+                with open(args.config, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+        else:
+            with open(args.config, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+
+        alias_map = {
+            'tcn': 'transmit_channel_num',
+            'ct': 'channel_type',
+            'md': 'model_dir',
+            'lmp': 'load_model_path',
+            'bs': 'batch_size',
+            'e': 'epochs',
+            'lr': 'learning_rate',
+            'ldd': 'loss_dir',
+            'ed': 'eval_dir',
+            'cmd': 'command',
+        }
+        for k, v in cfg.items():
+            attr = alias_map.get(k, k)
+            if hasattr(args, attr):
+                if attr == 'command' and args.command is None:
+                    args.command = v
+                elif attr == 'channel_type' and args.channel_type is None:
+                    args.channel_type = v
+                elif attr in ['transmit_channel_num', 'batch_size', 'epochs', 'learning_rate',
+                              'snr_low_train', 'snr_up_train', 'snr_low_eval', 'snr_up_eval',
+                              'model_dir', 'loss_dir', 'eval_dir', 'load_model_path']:
+                    cli_flags = ['--' + attr, '-' + attr]
+                    for flag_k, flag_attr in alias_map.items():
+                        if flag_attr == attr:
+                            cli_flags.extend(['--' + flag_k, '-' + flag_k])
+                    if not any(flag in sys.argv for flag in cli_flags):
+                        setattr(args, attr, v)
+
+    if args.command is None:
+        args.command = 'train'
+
     print("#######################################")
     print("Current execution paramenters:")
     for arg, value in sorted(vars(args).items()):
