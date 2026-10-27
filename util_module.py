@@ -86,6 +86,8 @@ class AF_Module(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, inputs, snr):
+        if snr.dtype != inputs.dtype:
+            snr = snr.to(inputs.dtype)
         gap = inputs.mean(dim=(2, 3))
         m = torch.cat([gap, snr], dim=1)
         m = self.relu(self.fc1(m))
@@ -103,6 +105,12 @@ class AF_Module_H(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, inputs, snr, h_real, h_imag):
+        if snr.dtype != inputs.dtype:
+            snr = snr.to(inputs.dtype)
+        if h_real.dtype != inputs.dtype:
+            h_real = h_real.to(inputs.dtype)
+        if h_imag.dtype != inputs.dtype:
+            h_imag = h_imag.to(inputs.dtype)
         gap = inputs.mean(dim=(2, 3))
         m = torch.cat([gap, snr, h_real, h_imag], dim=1)
         m = self.relu(self.fc1(m))
