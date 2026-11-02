@@ -106,3 +106,24 @@ def get_test_dataset_burst(snr_db, b_prob, b_stddev):
 
     test_ds = CIFAR10CustomDataset(test_base, snrdb_test, b_prob=b_prob_test, b_stddev=b_stddev_test)
     return test_ds, test_nums
+
+
+def get_dataset_snr_rayleigh(snr_db):
+    """Rayleigh channel dataset for a fixed SNR (H generated on-the-fly in Channel module)."""
+    return get_dataset_snr(snr_db)
+
+
+def get_dataset_snr_range_rayleigh(snr_db_low, snr_db_high):
+    """Rayleigh channel dataset for a uniform SNR range (H generated on-the-fly in Channel module)."""
+    return get_dataset_snr_range(snr_db_low, snr_db_high)
+
+
+def get_dataset_snr_and_rayleigh_h(snr_db):
+    """Rayleigh channel dataset for a fixed SNR with explicit CN(0,1) scalar H samples."""
+    return get_dataset_snr_and_h(snr_db)
+
+
+def get_dataset_snr_range_and_rayleigh_h(snr_db_low, snr_db_high):
+    """Rayleigh channel dataset for an SNR range with explicit CN(0,1) scalar H samples."""
+    return get_dataset_snr_range_and_h(snr_db_low, snr_db_high)
+

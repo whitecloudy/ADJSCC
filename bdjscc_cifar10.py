@@ -17,17 +17,24 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class BDJSCC_Model(nn.Module):
     def __init__(self, channel_type, tcn):
         super(BDJSCC_Model, self).__init__()
-        self.channel_type = channel_type
+        self.channel_type = str(channel_type).strip().lower() if channel_type is not None else 'awgn'
         self.encoder = Basic_Encoder(tcn)
         self.decoder = Basic_Decoder(tcn)
-        self.channel = Channel(channel_type)
+        self.channel = Channel(self.channel_type)
 
     def forward(self, inputs):
         imgs = inputs[0]
         snrdb = inputs[1]
-        if self.channel_type in ['slow_fading', 'slow_fading_eq']:
+        ct = self.channel_type
+        if ct in ['slow_fading', 'slow_fading_eq']:
             h_real = inputs[2]
             h_imag = inputs[3]
+            enc = self.encoder(imgs)
+            rv = self.channel(enc, snr_db=snrdb, h_real=h_real, h_imag=h_imag)
+            dec = self.decoder(rv)
+        elif ct in ['rayleigh_fading', 'rayleigh_fading_eq', 'rayleigh', 'rayleigh_eq']:
+            h_real = inputs[2] if len(inputs) > 2 else None
+            h_imag = inputs[3] if len(inputs) > 3 else None
             enc = self.encoder(imgs)
             rv = self.channel(enc, snr_db=snrdb, h_real=h_real, h_imag=h_imag)
             dec = self.decoder(rv)
@@ -58,10 +65,13 @@ def train(args, model):
     criterion = nn.MSELoss()
 
     for epoch in range(0, args.epochs):
-        if args.channel_type == 'awgn':
+        ct = str(args.channel_type).strip().lower()
+        if ct in ['awgn', 'rayleigh_fading', 'rayleigh_fading_eq', 'rayleigh', 'rayleigh_eq']:
             (train_ds, train_nums), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr(args.snr_train)
-        elif args.channel_type in ['slow_fading', 'slow_fading_eq']:
+        elif ct in ['slow_fading', 'slow_fading_eq']:
             (train_ds, train_nums), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr_and_h(args.snr_train)
+        else:
+            raise ValueError(f"Unknown channel_type: {args.channel_type}")
 
         train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
         test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
@@ -125,10 +135,13 @@ def train_mix(args, model):
     criterion = nn.MSELoss()
 
     for epoch in range(0, args.epochs):
-        if args.channel_type == 'awgn':
+        ct = str(args.channel_type).strip().lower()
+        if ct in ['awgn', 'rayleigh_fading', 'rayleigh_fading_eq', 'rayleigh', 'rayleigh_eq']:
             (train_ds, train_nums), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr_range(0, 20)
-        elif args.channel_type in ['slow_fading', 'slow_fading_eq']:
+        elif ct in ['slow_fading', 'slow_fading_eq']:
             (train_ds, train_nums), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr_and_h(args.snr_train)
+        else:
+            raise ValueError(f"Unknown channel_type: {args.channel_type}")
 
         train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
         test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
@@ -196,10 +209,13 @@ def eval_mismatch(args, model):
     for snrdb in range(0, 21):
         imse = []
         for i in range(0, 10):
-            if args.channel_type == 'awgn':
+            ct = str(args.channel_type).strip().lower()
+            if ct in ['awgn', 'rayleigh_fading', 'rayleigh_fading_eq', 'rayleigh', 'rayleigh_eq']:
                 (_, _), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr(snrdb)
-            elif args.channel_type in ['slow_fading', 'slow_fading_eq']:
+            elif ct in ['slow_fading', 'slow_fading_eq']:
                 (_, _), (test_ds, test_nums) = dataset_cifar10.get_dataset_snr_and_h(snrdb)
+            else:
+                raise ValueError(f"Unknown channel_type: {args.channel_type}")
 
             test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=True)
             running_mse = 0.0
@@ -238,7 +254,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("command", help='train/eval_mismatch/train_mix')
-    parser.add_argument("-ct", '--channel_type', help="awgn/slow_fading/slow_fading_eq")
+    parser.add_argument("-ct", '--channel_type', help="awgn/slow_fading/slow_fading_eq/rayleigh_fading/rayleigh_fading_eq")
     parser.add_argument("-md", '--model_dir', help="dir for model", default='model/')
     parser.add_argument("-lmp", '--load_model_path', help="model path for loading")
     parser.add_argument("-bs", "--batch_size", help="Batch size for training", default=128, type=int)
