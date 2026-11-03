@@ -73,8 +73,8 @@ def get_dataset_snr_and_h(snr_db):
 def get_dataset_snr_range(snr_db_low, snr_db_high):
     train_base, test_base = _load_cifar10()
     train_nums, test_nums = len(train_base), len(test_base)
-    snrdb_train = np.random.rand(train_nums, ) * (snr_db_high - snr_db_low) + snr_db_low
-    snrdb_test = np.random.rand(test_nums, ) * (snr_db_high - snr_db_low) + snr_db_low
+    snrdb_train = np.random.randint(int(snr_db_low), int(snr_db_high) + 1, size=(train_nums,)).astype(np.float32)
+    snrdb_test = np.random.randint(int(snr_db_low), int(snr_db_high) + 1, size=(test_nums,)).astype(np.float32)
 
     train_ds = CIFAR10CustomDataset(train_base, snrdb_train)
     test_ds = CIFAR10CustomDataset(test_base, snrdb_test)
@@ -86,9 +86,9 @@ def get_dataset_snr_range_and_h(snr_db_low, snr_db_high):
     train_nums, test_nums = len(train_base), len(test_base)
     h_real_train = np.sqrt(1 / 2) * np.random.randn(train_nums, )
     h_imag_train = np.sqrt(1 / 2) * np.random.randn(train_nums, )
-    snrdb_train = np.random.rand(train_nums, ) * (snr_db_high - snr_db_low) + snr_db_low
+    snrdb_train = np.random.randint(int(snr_db_low), int(snr_db_high) + 1, size=(train_nums,)).astype(np.float32)
 
-    snrdb_test = np.random.rand(test_nums, ) * (snr_db_high - snr_db_low) + snr_db_low
+    snrdb_test = np.random.randint(int(snr_db_low), int(snr_db_high) + 1, size=(test_nums,)).astype(np.float32)
     h_real_test = np.sqrt(1 / 2) * np.random.randn(test_nums, )
     h_imag_test = np.sqrt(1 / 2) * np.random.randn(test_nums, )
 

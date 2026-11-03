@@ -39,7 +39,7 @@ def get_dataset_snr_range(snr_db_low, snr_db_high):
     train_nums = get_num_samples(imgnet_filenames)
     imgnet_path_ds = tf.data.TFRecordDataset(imgnet_filenames)
     imgnet_ds = imgnet_path_ds.map(_parse_function)
-    snrdb_train = np.random.rand(train_nums, ) * (snr_db_high - snr_db_low) + snr_db_low
+    snrdb_train = np.random.randint(int(snr_db_low), int(snr_db_high) + 1, size=(train_nums,)).astype(np.float32)
     snrdb_train_ds = tf.data.Dataset.from_tensor_slices(snrdb_train)
     train_ds = tf.data.Dataset.zip(((imgnet_ds, snrdb_train_ds), imgnet_ds))
     return train_ds, train_nums
@@ -51,8 +51,8 @@ def get_dataset_snr_range_and_h(snr_db_low, snr_db_high):
     train_nums, test_nums = len(x_train), len(x_test)
     h_real_train = np.sqrt(1 / 2) * np.random.randn(train_nums, )
     h_imag_train = np.sqrt(1 / 2) * np.random.randn(train_nums, )
-    snrdb_train = np.random.rand(train_nums, ) * (snr_db_high - snr_db_low) + snr_db_low
-    snrdb_test = np.random.rand(test_nums, ) * (snr_db_high - snr_db_low) + snr_db_low
+    snrdb_train = np.random.randint(int(snr_db_low), int(snr_db_high) + 1, size=(train_nums,)).astype(np.float32)
+    snrdb_test = np.random.randint(int(snr_db_low), int(snr_db_high) + 1, size=(test_nums,)).astype(np.float32)
     h_real_test = np.sqrt(1 / 2) * np.random.randn(test_nums, )
     h_imag_test = np.sqrt(1 / 2) * np.random.randn(test_nums, )
     train_ds = tf.data.Dataset.from_tensor_slices(((x_train, snrdb_train, h_real_train, h_imag_train), x_train))
