@@ -52,6 +52,10 @@ def train(args, model):
     val_loss_list = []
     min_loss = 10 ** 8
 
+    patience = getattr(args, 'patience', 20)
+    patience_counter = 0
+    best_epoch = 0
+
     os.makedirs(args.model_dir, exist_ok=True)
     os.makedirs(args.loss_dir, exist_ok=True)
 
@@ -107,10 +111,13 @@ def train(args, model):
 
         if val_loss < min_loss:
             min_loss = val_loss
+            patience_counter = 0
+            best_epoch = epoch + 1
             torch.save(model.state_dict(), model_path)
             print('Epoch:', epoch + 1, ',loss=', epoch_loss, 'val_loss:', val_loss, 'save')
         else:
-            print('Epoch:', epoch + 1, ',loss=', epoch_loss, 'val_loss:', val_loss)
+            patience_counter += 1
+            print(f'Epoch: {epoch + 1} ,loss= {epoch_loss} val_loss: {val_loss} (no improvement: {patience_counter}/{patience})')
 
         epoch_list.append(epoch)
         loss_list.append(epoch_loss)
@@ -118,12 +125,21 @@ def train(args, model):
         with open(os.path.join(args.loss_dir, filename + '.json'), mode='w') as f:
             json.dump({'epoch': epoch_list, 'loss': loss_list, 'val_loss': val_loss_list}, f)
 
+        if patience is not None and patience > 0 and patience_counter >= patience:
+            print(f'\n[Early Stopping] Validation loss did not improve for {patience} consecutive epochs.')
+            print(f'[Early Stopping] Best val_loss: {min_loss} at Epoch {best_epoch}. Terminating training.\n')
+            break
+
 
 def train_mix(args, model):
     epoch_list = []
     loss_list = []
     val_loss_list = []
     min_loss = 10 ** 8
+
+    patience = getattr(args, 'patience', 20)
+    patience_counter = 0
+    best_epoch = 0
 
     os.makedirs(args.model_dir, exist_ok=True)
     os.makedirs(args.loss_dir, exist_ok=True)
@@ -177,16 +193,24 @@ def train_mix(args, model):
 
         if val_loss < min_loss:
             min_loss = val_loss
+            patience_counter = 0
+            best_epoch = epoch + 1
             torch.save(model.state_dict(), model_path)
             print('Epoch:', epoch + 1, ',loss=', epoch_loss, 'val_loss:', val_loss, 'save')
         else:
-            print('Epoch:', epoch + 1, ',loss=', epoch_loss, 'val_loss:', val_loss)
+            patience_counter += 1
+            print(f'Epoch: {epoch + 1} ,loss= {epoch_loss} val_loss: {val_loss} (no improvement: {patience_counter}/{patience})')
 
         epoch_list.append(epoch)
         loss_list.append(epoch_loss)
         val_loss_list.append(val_loss)
         with open(os.path.join(args.loss_dir, filename + '.json'), mode='w') as f:
             json.dump({'epoch': epoch_list, 'loss': loss_list, 'val_loss': val_loss_list}, f)
+
+        if patience is not None and patience > 0 and patience_counter >= patience:
+            print(f'\n[Early Stopping] Validation loss did not improve for {patience} consecutive epochs.')
+            print(f'[Early Stopping] Best val_loss: {min_loss} at Epoch {best_epoch}. Terminating training.\n')
+            break
 
 
 def eval_mismatch(args, model):
@@ -269,6 +293,8 @@ if __name__ == "__main__":
     parser.add_argument("-ldd", "--loss_dir", help="loss_dir for training", default='loss/')
     parser.add_argument("-ed", "--eval_dir", help="eval_dir", default='eval/')
     parser.add_argument("-mm", "--min_mag", help="minimum channel magnitude threshold for fading channels (default: 0.1)", default=0.1, type=float)
+    parser.add_argument("-p", "--patience", "--early_stopping_patience", dest="patience",
+                        help="early stopping patience in epochs (default: 20, set <= 0 to disable)", default=20, type=int)
     global args
     args = parser.parse_args()
     print("#######################################")
