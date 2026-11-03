@@ -15,12 +15,13 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class BDJSCC_Model(nn.Module):
-    def __init__(self, channel_type, tcn):
+    def __init__(self, channel_type, tcn, min_mag=0.1):
         super(BDJSCC_Model, self).__init__()
         self.channel_type = str(channel_type).strip().lower() if channel_type is not None else 'awgn'
+        self.min_mag = float(min_mag)
         self.encoder = Basic_Encoder(tcn)
         self.decoder = Basic_Decoder(tcn)
-        self.channel = Channel(self.channel_type)
+        self.channel = Channel(self.channel_type, min_mag=self.min_mag)
 
     def forward(self, inputs):
         imgs = inputs[0]
@@ -240,7 +241,8 @@ def eval_mismatch(args, model):
 
 
 def main(args):
-    model = BDJSCC_Model(args.channel_type, args.transmit_channel_num).to(device)
+    min_mag = getattr(args, 'min_mag', 0.1)
+    model = BDJSCC_Model(args.channel_type, args.transmit_channel_num, min_mag=min_mag).to(device)
     print(model)
 
     if args.command == 'train':
@@ -266,6 +268,7 @@ if __name__ == "__main__":
     parser.add_argument("-snr_eval", "--snr_eval", help="snr for evaluation", default=10, type=int)
     parser.add_argument("-ldd", "--loss_dir", help="loss_dir for training", default='loss/')
     parser.add_argument("-ed", "--eval_dir", help="eval_dir", default='eval/')
+    parser.add_argument("-mm", "--min_mag", help="minimum channel magnitude threshold for fading channels (default: 0.1)", default=0.1, type=float)
     global args
     args = parser.parse_args()
     print("#######################################")

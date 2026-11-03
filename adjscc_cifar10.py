@@ -18,16 +18,17 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class ADJSCC_Model(nn.Module):
-    def __init__(self, channel_type, tcn):
+    def __init__(self, channel_type, tcn, min_mag=0.1):
         super(ADJSCC_Model, self).__init__()
         self.channel_type = str(channel_type).strip().lower() if channel_type is not None else 'awgn'
+        self.min_mag = float(min_mag)
         if self.channel_type in ['slow_fading', 'slow_fading_eq']:
             self.encoder = Attention_Encoder_H(tcn)
             self.decoder = Attention_Decoder_H(tcn)
         else:
             self.encoder = Attention_Encoder(tcn)
             self.decoder = Attention_Decoder(tcn)
-        self.channel = Channel(self.channel_type)
+        self.channel = Channel(self.channel_type, min_mag=self.min_mag)
 
     def forward(self, inputs):
         imgs = inputs[0]
@@ -228,7 +229,8 @@ def eval_burst(args):
 
 
 def main(args):
-    model = ADJSCC_Model(args.channel_type, args.transmit_channel_num).to(device)
+    min_mag = getattr(args, 'min_mag', 0.1)
+    model = ADJSCC_Model(args.channel_type, args.transmit_channel_num, min_mag=min_mag).to(device)
     print(model)
 
     if args.command == 'train':
@@ -261,6 +263,8 @@ if __name__ == "__main__":
     parser.add_argument("-b_snr_eval", "--burst_snr_eval", help="snr_eval for eval_burst", default=10, type=int)
     parser.add_argument("-b_stddev", "--burst_standard_derivation", help="burst_standard_derivation for eval_burst",
                         default=0., type=float)
+    parser.add_argument("-mm", "--min_mag", help="minimum channel magnitude threshold for fading channels (default: 0.1)",
+                        default=0.1, type=float)
     global args
     args = parser.parse_args()
 
@@ -289,6 +293,9 @@ if __name__ == "__main__":
             'ldd': 'loss_dir',
             'ed': 'eval_dir',
             'cmd': 'command',
+            'mm': 'min_mag',
+            'min_mag': 'min_mag',
+            'eps_eq': 'min_mag',
         }
         for k, v in cfg.items():
             attr = alias_map.get(k, k)
@@ -299,7 +306,7 @@ if __name__ == "__main__":
                     args.channel_type = v
                 elif attr in ['transmit_channel_num', 'batch_size', 'epochs', 'learning_rate',
                               'snr_low_train', 'snr_up_train', 'snr_low_eval', 'snr_up_eval',
-                              'model_dir', 'loss_dir', 'eval_dir', 'load_model_path']:
+                              'model_dir', 'loss_dir', 'eval_dir', 'load_model_path', 'min_mag']:
                     cli_flags = ['--' + attr, '-' + attr]
                     for flag_k, flag_attr in alias_map.items():
                         if flag_attr == attr:
